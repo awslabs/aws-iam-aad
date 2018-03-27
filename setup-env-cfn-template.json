@@ -1,0 +1,416 @@
+{
+   "AWSTemplateFormatVersion": "2010-09-09",
+	"Parameters" : {
+		"KeyName": {
+		  "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+		  "Type": "AWS::EC2::KeyPair::KeyName",
+		  "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+		},
+		"SSHLocation" : {
+		  "Description" : "The IP address range that can be used to SSH to the EC2 instances",
+		  "Type": "String",
+		  "MinLength": "9",
+		  "MaxLength": "18",
+		  "Default": "0.0.0.0/0",
+		  "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+		  "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+	    },
+		"SyncFrequency" : {
+		  "Description" : "Synchronization frequency in terms of minutes.",
+		  "Type": "Number",
+		  "MinValue": 1,
+		  "MaxValue": 1440,
+		  "Default": 30,
+		  "ConstraintDescription": "must be an integer value between 1 (minute) to 1440 (24 hours)."
+	    },
+		"SubnetId":{
+		  "Type":"AWS::EC2::Subnet::Id",
+		  "Description":"ID of the subnet to be used as deployment target of ECS Fargate Tasks (e.g. subnet-348d2642)."
+		},
+		"NamingConvention" : {
+		  "Description" : "Naming convention to map AWS IAM Roles to Azure AD roles and Groups. Use {0} for AWS Account and {1} for IAM Role name.",
+		  "Type": "String",
+		  "MinLength": "6",
+		  "MaxLength": "20",
+		  "Default": "AWS {0} - {1}"
+	    }
+	},
+	"Mappings" : {
+		"AWSRegionArch2AMI" : {
+		  "us-east-1"        : {"HVM64" : "ami-26ebbc5c"},
+		  "us-east-2"        : {"HVM64" : "ami-0b1e356e"},
+		  "us-west-1"        : {"HVM64" : "ami-77a2a317"},
+		  "us-west-2"        : {"HVM64" : "ami-223f945a"},
+		  "eu-west-1"        : {"HVM64" : "ami-c90195b0"},
+		  "eu-west-2"        : {"HVM64" : "ami-c1d2caa5"},
+		  "eu-west-3"     	 : {"HVM64" : "ami-dc13a4a1"},
+		  "ap-northeast-1"   : {"HVM64" : "ami-eb50cd8d"},
+		  "ap-northeast-2"   : {"HVM64" : "ami-26f75748"},
+		  "ap-southeast-1"   : {"HVM64" : "ami-5ae89f26"},
+		  "ap-southeast-2"   : {"HVM64" : "ami-1987757b"},
+		  "ap-south-1"       : {"HVM64" : "ami-e60e5a89"},
+		  "ca-central-1"     : {"HVM64" : "ami-c1cb4ea5"},
+		  "sa-east-1"        : {"HVM64" : "ami-0e88cb62"}
+		}
+	},
+	"Resources": {
+		"S3Bucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName" : { "Ref": "AWS::StackName" }
+            }
+        },
+		"SetupWaitHandle" : {
+			 "Type" : "AWS::CloudFormation::WaitConditionHandle",
+			 "Properties" : {
+			 }
+		},
+		"SetupWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "SetupEC2Instance",
+			"Properties" : {
+				"Handle" : { "Ref" : "SetupWaitHandle" },
+				 "Timeout" : "4500"
+			}
+		},
+		"SetupEC2Instance": {
+		 "Type": "AWS::EC2::Instance",
+		 "DependsOn" : "SetupWaitHandle",
+		 "Version": "2009-05-15",
+		 "Properties": {
+			"ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, "HVM64" ] },
+			"InstanceType": "t2.micro",
+			"Monitoring": "true",
+			"DisableApiTermination": "false",
+			"KeyName" : { "Ref" : "KeyName" },
+			"SecurityGroups" : [ { "Ref" : "InstanceSecurityGroup" } ],
+			"IamInstanceProfile": {
+			   "Ref": "SetupEC2InstanceProfile"
+			},			
+			"UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+			"#!/bin/bash \n",
+			"sed -i -e '/\\[rhui-REGION-rhel-server-extras\\]/,/^\\[/s/enabled=0/enabled=1/' /etc/yum.repos.d/redhat-rhui.repo \n",
+			"sed -i -e '/\\[rhui-REGION-rhel-server-optional\\]/,/^\\[/s/enabled=0/enabled=1/' /etc/yum.repos.d/redhat-rhui.repo \n",
+			"yum install -y docker \n",
+			"systemctl enable docker \n",
+			"systemctl start docker \n",
+			"mkdir -p /home/ec2-user/scripts/setup \n",
+			"mkdir -p /home/ec2-user/scripts/docker \n",
+			"chown ec2-user:ec2-user /home/ec2-user/scripts /home/ec2-user/scripts/setup /home/ec2-user/scripts/docker \n",
+			"chmod 777 /home/ec2-user/scripts \n",
+			"curl https://packages.microsoft.com/config/rhel/7/prod.repo | tee /etc/yum.repos.d/microsoft.repo; \n",
+			"yum install -y powershell; \n",
+			"cat > /tmp/install_aws.ps1 <<EOF\n",
+			"\\$ecrComm = Get-Command New-ECRRepository \n",
+			"if (\\$ecrComm -eq \\$null) \n",
+			"{ \n",
+			"  Set-PSRepository -Name PSGallery -InstallationPolicy Trusted \n",
+			"  Install-Module -Name AWSPowerShell.NetCore \n",
+			"} \n",	
+			"EOF\n",
+			"chmod +x /tmp/install_aws.ps1 \n",
+			"pwsh -Command /tmp/install_aws.ps1 \n",
+			"cat >> /home/ec2-user/.bash_profile <<EOF\n",
+			"sudo yum install -y powershell; \n",			
+			"sudo pwsh -Command /tmp/install_aws.ps1 \n",
+			"sudo yum install -y docker \n",
+			"sudo systemctl start docker \n",
+			"SETUP_PS1=\"/home/ec2-user/scripts/setup/setup.ps1\" \n",
+			"SETUP_PS_COMMAND=\"/home/ec2-user/scripts/setup/setup.ps1 ", "-appName ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref" : "AWS::Region" }, "\" \n",
+			"if [[ -f \\$SETUP_PS1 ]] \n",
+			"then \n",
+			"    cd /home/ec2-user/scripts/setup \n",
+			"    ls -la \n",
+			"    pwsh -Command \\$SETUP_PS_COMMAND \n",
+			"else \n",
+			"    pwsh \n",
+			"fi \n",
+			"EOF\n",			
+			"SignalURL=\"", { "Ref" : "SetupWaitHandle" }, "\" \n",
+			"curl -X PUT -H 'Content-Type:' --data-binary '{\"Status\" : \"SUCCESS\",\"Reason\" : \"Configuration Complete\",\"UniqueId\" : \"ID1234\",\"Data\" : \"Application has completed configuration.\"}' \"${SignalURL}\" \n"
+			]]}}
+		 }
+		},
+		"SetupRole": {
+		 "Type": "AWS::IAM::Role",
+		 "Properties": {
+			"AssumeRolePolicyDocument": {
+			   "Version" : "2012-10-17",
+			   "Statement": [ {
+				  "Effect": "Allow",
+				  "Principal": {
+					 "Service": [ "ec2.amazonaws.com" ]
+				  },
+				  "Action": [ "sts:AssumeRole" ]
+			   } ]
+			},
+			"Path": "/"
+		 }
+		},
+		"RolePolicies": {
+		 "Type": "AWS::IAM::Policy",
+		 "Properties": {
+			"PolicyName": "FedSyncSetupEc2Permissions",
+			"PolicyDocument": {
+			   "Version" : "2012-10-17",
+			   "Statement": [ 
+					{
+					  "Effect": "Allow",
+					  "Action": "kms:*",
+					  "Resource": "*"
+					},
+					{
+					  "Effect": "Allow",
+					  "Action": "ssm:*",
+					  "Resource": "*"
+					},
+					{
+					  "Effect": "Allow",
+					  "Action": "iam:*",
+					  "Resource": "*"
+					},
+					{
+					  "Effect": "Allow",
+					  "Action": "ecr:*",
+					  "Resource": "*"
+					}
+			   ]
+			},
+			"Roles": [ { "Ref": "SetupRole" } ]
+		 }
+		},
+		"SetupEC2InstanceProfile": {
+		 "Type": "AWS::IAM::InstanceProfile",
+		 "Properties": {
+			"Path": "/",
+			"Roles": [ { "Ref": "SetupRole" } ]
+		 }
+		},
+		"InstanceSecurityGroup" : {
+		  "Type" : "AWS::EC2::SecurityGroup",
+		  "Properties" : {
+			"GroupDescription" : "Enable SSH access via port 22",
+			"SecurityGroupIngress" : [ {
+			  "IpProtocol" : "tcp",
+			  "FromPort" : "22",
+			  "ToPort" : "22",
+			  "CidrIp" : { "Ref" : "SSHLocation"}
+			} ]
+		  }
+		},
+		"FedSyncEcsCluster": {
+		  "Type": "AWS::ECS::Cluster"
+		},
+		"TaskDefinition": {
+		  "Type": "AWS::ECS::TaskDefinition",
+		  "Properties" : {
+			"ContainerDefinitions" : [
+				{
+				  "Name": {"Ref": "AWS::StackName"},
+				  "Image": { "Fn::Join" : ["", [ { "Ref" : "AWS::AccountId" }, ".dkr.ecr.", { "Ref" : "AWS::Region" }, ".amazonaws.com/", {"Ref": "AWS::StackName"}, ":latest" ]]},
+				  "Essential": "true",
+				  "Environment": [
+					{
+					  "Name" : "AppBucketName",
+					  "Value" : { "Ref": "AWS::StackName" }
+					},
+					{
+					  "Name" : "AppName",
+					  "Value" : {"Ref": "AWS::StackName"}
+					},
+					{
+					  "Name" : "Region",
+					  "Value" : { "Ref" : "AWS::Region" }
+					},
+					{
+					  "Name" : "NamingConvention",
+					  "Value" : { "Ref" : "NamingConvention"}
+					}
+				  ]
+				}
+			],
+			"RequiresCompatibilities": ["FARGATE"],
+			"NetworkMode" : "awsvpc",
+			"Cpu" : "256",
+			"Memory": "0.5GB",
+			"TaskRoleArn" : { "Fn::GetAtt": ["ECSTaskRole", "Arn"] },
+			"ExecutionRoleArn": { "Fn::GetAtt": ["ECSExecutionRole", "Arn"] }
+		  }
+		},
+		"ECSTaskRole": {
+		  "Type": "AWS::IAM::Role",
+		  "Properties": {
+			"AssumeRolePolicyDocument": {
+			   "Version" : "2012-10-17",
+			   "Statement": [ {
+				  "Effect": "Allow",
+				  "Principal": {
+					 "Service": "ecs-tasks.amazonaws.com"
+				  },
+				  "Action": [ "sts:AssumeRole" ]
+			   } ]
+			},
+			"ManagedPolicyArns": ["arn:aws:iam::aws:policy/IAMReadOnlyAccess"],
+			"Path": "/",
+			"RoleName": { "Fn::Join" : ["", [ { "Ref" : "AWS::StackName" }, "_ECS_Role" ]]}
+		  }
+		},
+		"ECSExecutionRole": {
+		  "Type": "AWS::IAM::Role",
+		  "Properties": {
+			"AssumeRolePolicyDocument": {
+			   "Version" : "2012-10-17",
+			   "Statement": [ {
+				  "Effect": "Allow",
+				  "Principal": {
+					 "Service": "ecs-tasks.amazonaws.com"
+				  },
+				  "Action": [ "sts:AssumeRole" ]
+			   } ]
+			},
+			"ManagedPolicyArns": ["arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"],
+			"Path": "/"
+		  }
+		},
+		"ECSTaskRolePolicies": {
+		  "Type": "AWS::IAM::Policy",
+		  "Properties": {
+			"PolicyName": "FedSyncContainerPermissions",
+			"PolicyDocument": {
+			   "Version" : "2012-10-17",
+			   "Statement": [
+					{
+					  "Effect": "Allow",
+					  "Action": [
+						"sts:AssumeRole"
+					  ],
+					  "Resource": "*"
+					},
+					{
+					  "Effect": "Allow",
+					  "Action": [
+						"s3:*"
+					  ],
+					  "Resource": [
+						{ "Fn::GetAtt": ["S3Bucket", "Arn"] },
+						{ "Fn::Join" : ["", [ { "Fn::GetAtt": ["S3Bucket", "Arn"] }, "/*" ]]}
+					  ]
+					}
+				]
+			},
+			"Roles": [ { "Ref": "ECSTaskRole" } ]
+		  }
+		},
+		"ScheduledRule": {
+		  "Type": "AWS::Events::Rule",
+		  "Properties": {
+			"Description": "ScheduledRule",
+			"ScheduleExpression": { "Fn::Join" : ["", [ "rate(", { "Ref" : "SyncFrequency" }, " minutes)" ]]},
+			"State": "ENABLED",
+			"Targets": [{
+			  "Arn": { "Fn::GetAtt": ["RunECSTaskLambda", "Arn"] },
+			  "Id": { "Ref": "RunECSTaskLambda" }
+			}]
+		  }
+		},
+		"PermissionForEventsToInvokeLambda": {
+		  "Type": "AWS::Lambda::Permission",
+		  "Properties": {
+			"FunctionName": { "Ref": "RunECSTaskLambda" },
+			"Action": "lambda:InvokeFunction",
+			"Principal": "events.amazonaws.com",
+			"SourceArn": { "Fn::GetAtt": ["ScheduledRule", "Arn"] }
+		  }
+		},
+		"RunECSTaskLambda": {
+		  "Type": "AWS::Lambda::Function",
+		  "DependsOn": [
+				"LambdaExecutionPolicy"
+			],
+		  "Properties": {
+			"Handler": "index.lambda_handler",
+			"Role": { "Fn::GetAtt" : ["LambdaExecutionRole", "Arn"] },
+			"Code": {
+			  "ZipFile": { "Fn::Join": ["", [
+					"import boto3 \n",
+					"def lambda_handler(event,context): \n",
+					"  client = boto3.client('ecs') \n",
+					"  response = client.run_task( \n",
+					"  cluster='", { "Ref": "FedSyncEcsCluster" }, "', # name of the cluster \n",
+					"  launchType = 'FARGATE', \n",
+					"  taskDefinition='", { "Ref": "TaskDefinition" }, "', # task definition name and revision \n",
+					"  count = 1, \n",
+					"  platformVersion='LATEST', \n",
+					"  networkConfiguration={ \n",
+					"        'awsvpcConfiguration': { \n",
+					"            'subnets': [ \n",
+					"                '", { "Ref": "SubnetId" }, "' \n",
+					"            ], \n",
+					"            'assignPublicIp': 'ENABLED' \n",
+					"        } \n",
+					"    }) \n",
+					"  return str(response) \n"
+				]]}
+			},
+			"Runtime": "python2.7",
+			"Timeout": "25",
+			"TracingConfig": {
+			  "Mode": "Active"
+		   }
+		  }
+		},
+		"LambdaExecutionRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": {
+								"Service": ["lambda.amazonaws.com"]
+							},
+							"Action": ["sts:AssumeRole"]
+						}
+					]
+				},
+				"ManagedPolicyArns": ["arn:aws:iam::aws:policy/AWSLambdaExecute"],
+				"Path": "/"
+			}
+		},
+		"LambdaExecutionPolicy": {
+			"DependsOn": [
+				"LambdaExecutionRole"
+			],
+			"Type": "AWS::IAM::Policy",
+			"Properties": {
+				"PolicyName": "LambdaECSTaskExecutionPolicy",
+				"Roles": [
+					{"Ref": "LambdaExecutionRole"}
+				],
+				"PolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Action": 
+								[
+									"ecs:RunTask",
+									"xray:PutTelemetryRecords",
+									"xray:PutTraceSegments",
+									"iam:PassRole"
+								],
+							"Resource": ["*"]
+						}
+					]
+				}
+			}
+		}
+   },
+   "Outputs" : {
+		"PublicIp" : {
+		  "Value" : { "Fn::GetAtt" : [ "SetupEC2Instance", "PublicIp" ]},
+		  "Description" : "Server's PublicIp Address"
+		}
+   }
+}

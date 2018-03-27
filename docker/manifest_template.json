@@ -1,0 +1,15 @@
+{
+  "appId": "appId",
+  "appRoles": [
+    {
+      "allowedMemberTypes": [
+        "User"
+      ],
+      "displayName": "msiam_access",
+      "id": "id",
+      "isEnabled": true,
+      "description": "msiam_access",
+      "value": null
+    }
+  ]
+}
