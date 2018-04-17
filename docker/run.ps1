@@ -12,6 +12,7 @@
   permissions and limitations under the License.#>
 
 #region defining directory separator character based on environment OS
+#region defining directory separator character based on environment OS
 $dirChar = "\"
 if ([Environment]::OSVersion.Platform -eq "Unix")
 {
@@ -36,16 +37,12 @@ $msiam_access_id = (Get-SSMParameter -Name $env:AppName".msiam_access_id" -WithD
 $SAMLMetaDataEntityDescriptorID = (Get-SSMParameter -Name $env:AppName".SAMLMetaDataEntityDescriptorID" -WithDecryption $true -Region $env:Region).Value
 $SAMLMetaDataEntityDescriptorEntityID = (Get-SSMParameter -Name $env:AppName".SAMLMetaDataEntityDescriptorEntityID" -WithDecryption $true -Region $env:Region).Value
 
-$existingParameters = Get-SSMParameterList -Region $env:Region
+$arnListStr = (Get-SSMParameter -Name $env:AppName".arn" -Region $env:Region).Value
+$arnArr = $arnListStr.Split(',');
 $arnList = [System.Collections.ArrayList]::new()
-foreach ($p in $existingParameters)
+foreach ($a in $arnArr)
 {
-	$pattern = "{0}.arn*" -f $env:AppName
-    if ($p.Name -Like $pattern)
-    {
-		$par = Get-SSMParameter -Name $p.Name -WithDecryption $true -Region $env:Region
-        $arnList.Add($par.Value)
-    }
+	$arnList.Add($a)
 }
 $arnListJson = ConvertTo-Json -InputObject $arnList;
 $arnListPath = "{0}{1}arnList.json" -f $PSScriptRoot, $dirChar

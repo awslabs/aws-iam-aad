@@ -22,7 +22,8 @@ param (
     [string] $azureADTenantName,
     [string] $azureUserName, 
     [string] $azurePassword, 
-    [string] $appName = "aad_aws_sso", 
+    [string] $appName = "aad_aws_sso",
+	[Parameter(Mandatory=$true)]	
     [string] $kmsKeyId, 
     [string] $NamingConvention = "AWS {0} - {1}", 
     [string] $Region = "us-east-1"
@@ -69,85 +70,30 @@ if ([Environment]::OSVersion.Platform -eq "Unix")
     #region Testing credentials
     Write-Host "Testing provided Azure credentials..."
     $aadLoginScript = "{0}{1}get_aad_access_token.ps1 -azureADTenantName {2} -azureUserName {3} -azurePassword {4}" -f $PSScriptRoot, $dirChar, $azureADTenantName, $azureUserName, $azurePassword
-    $azureResponse =  Invoke-Expression -Command $aadLoginScript
+	try
+	{
+		$azureResponse =  Invoke-Expression -Command $aadLoginScript
+	}
+	catch
+	{
+		if ($_Exception.Message.contains("AADSTS70002"))
+		{
+			Write-Host "Invalid Azure AD credentials. Login failed while testing provided credentials." -ForegroundColor Red
+		}
+		elseif ($_Exception.Message.contains("AADSTS70002"))
+		{
+			Write-Host "Invalid AAD tenant name. Login failed while testing provided credentials." -ForegroundColor Red
+		}
+		else
+		{
+			Write-Host $_Exception.Message -ForegroundColor Red
+		}
+		
+		Write-Host "Encountered error while validating parameters. Aborting execution. Please re-run the script either through command line, or by opening a new session."
+		Exit 1;
+	}
     Write-Host $azureResponse -ForegroundColor Yellow
     #endregion
-#endregion
-
-#region Verifying KMS key ID
-try
-{
-    $kmsKey = Get-KMSKey -KeyId $kmsKeyId -Region $Region
-}
-catch
-{
-    Write-Host "You have not provided a KMS key or the key id you have provided does not exist. Would you like to create a new key now? If you select no, the default KMS key for SSM will be used. (enter <y> to create a new key)"
-    $createNewKey = Read-Host
-    if ($createNewKey -eq "y" -or $createNewKey -eq "Y")
-    {
-        $kmsKeyId = (New-KMSKey -Description $appName"_secrets_key" -Region $Region).KeyId
-    }
-    else
-    {
-        Write-Host "Default SSM key will be used for encryption of secrets."
-        $kmsKeyId = "alias/aws/ssm"
-    }
-}
-#endregion
-
-###############################################################################################################
-
-#region Finding IAM Role for ECS Fargate task
-$roleName = "{0}_ECS_Role" -f $appName
-$role = Get-IAMRole -RoleName $roleName
-#endregion
-
-#region Ascertaining account id
-$keyArn = (Get-KMSKey -KeyId $kmsKeyId).Arn
-$keyArnSegments = ([System.String]$keyArn).Split(':')
-$accountId = $keyArnSegments[4]
-#endregion
-
-#region Creating policy document to get AWS Parameter Store secrets
-
-    #region generating secret access policy document
-    $secretAccessPolicyTemplatePath = "{0}{1}aad-sso-secret-access.json" -f $PSScriptRoot, $dirChar
-
-    $secretAccessPolicy = [System.IO.File]::ReadAllText($secretAccessPolicyTemplatePath)
-    $secretAccessPolicy = ([System.String]$secretAccessPolicy).Replace("<key-id-aad_aws_sso-key>", $kmsKeyId)
-    $secretAccessPolicy = ([System.String]$secretAccessPolicy).Replace("<account-id>", $accountId)
-	$secretAccessPolicy = ([System.String]$secretAccessPolicy).Replace("<app_name>", $appName)
-    #endregion
-
-$policyArn = "arn:aws:iam::{0}:policy/{1}" -f $accountId, $appName
-
-$policy = $null
-try
-{
-	$policy = Get-IAMPolicy -PolicyArn $policyArn
-}
-catch
-{
-	Write-Host "Creating policy to grant access to SSM Parameter Store..."
-}
-if ($policy -ne $null)
-{
-	if ($role -ne $null)
-	{
-		$attachedPolicies = Get-IAMAttachedRolePolicyList -RoleName $roleName
-		foreach ($p in $attachedPolicies)
-		{
-			if ($p.PolicyArn -eq $policyArn)
-			{
-				Unregister-IAMRolePolicy -RoleName $roleName -PolicyArn $p.PolicyArn
-			}			
-		}
-	}
-    Remove-IAMPolicy -PolicyArn $policyArn
-}
-
-New-IAMPolicy -PolicyName $appName -PolicyDocument $secretAccessPolicy
-Register-IAMRolePolicy -RoleName $roleName -PolicyArn $policyArn
 #endregion
 
 #region Acquiring app manifest json values
@@ -187,49 +133,102 @@ $json = [System.IO.File]::ReadAllText($SwitchRoleArnsFilePath);
 $arns = ConvertFrom-Json -InputObject $json;
 #endregion
 
-#region Removing existing SSM parameters
-$existingParameters = Get-SSMParameterList -Region $Region
-foreach ($p in $existingParameters)
-{
-    if ($p.Name -Like "$appName*")
-    {
-        Remove-SSMParameter -Name $p.Name -Force -Region $Region
-    }
-}
-#endregion
-
 #region Creating SSM Parameters
-Write-SSMParameter -Name $appName".azureADTenantName" -Value $azureADTenantName -KeyId $kmsKeyId -Type SecureString -Region $Region
-Write-SSMParameter -Name $appName".azureUserName" -Value $azureUserName -KeyId $kmsKeyId -Type SecureString -Region $Region
-Write-SSMParameter -Name $appName".azurePassword" -Value $azurePassword -KeyId $kmsKeyId -Type SecureString -Region $Region
+Write-SSMParameter -Name $appName".azureADTenantName" -Value $azureADTenantName -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+Write-SSMParameter -Name $appName".azureUserName" -Value $azureUserName -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+Write-SSMParameter -Name $appName".azurePassword" -Value $azurePassword -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
 
-Write-SSMParameter -Name $appName".appId" -Value $appId -KeyId $kmsKeyId -Type SecureString -Region $Region
-Write-SSMParameter -Name $appName".msiam_access_id" -Value $msiam_access_id -KeyId $kmsKeyId  -Type SecureString -Region $Region
+Write-SSMParameter -Name $appName".appId" -Value $appId -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+Write-SSMParameter -Name $appName".msiam_access_id" -Value $msiam_access_id -KeyId $kmsKeyId  -Type SecureString -Region $Region -Overwrite $true
 
-Write-SSMParameter -Name $appName".SAMLMetaDataEntityDescriptorID" -Value $SAMLMetaDataEntityDescriptorID -KeyId $kmsKeyId -Type SecureString -Region $Region
-Write-SSMParameter -Name $appName".SAMLMetaDataEntityDescriptorEntityID" -Value $SAMLMetaDataEntityDescriptorEntityID -KeyId $kmsKeyId -Type SecureString -Region $Region
+Write-SSMParameter -Name $appName".SAMLMetaDataEntityDescriptorID" -Value $SAMLMetaDataEntityDescriptorID -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+Write-SSMParameter -Name $appName".SAMLMetaDataEntityDescriptorEntityID" -Value $SAMLMetaDataEntityDescriptorEntityID -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
 
+$arnsList = ""
 for ($c = 0; $c -lt $arns.Count; $c++)
 {
-    Write-SSMParameter -Name $appName".arn"$c -Value $arns[$c] -KeyId $kmsKeyId -Type SecureString -Region $Region
+	if ([System.String]::IsNullOrWhiteSpace($arnsList))
+	{
+		$arnsList = $arns[$c].Trim()
+	}
+	else
+	{
+		$arnsList = "{0},{1}" -f $arnsList, $arns[$c].Trim()
+	}    
 }
+Write-SSMParameter -Name $appName".arn" -Value $arnsList -Type StringList -Region $Region -Overwrite $true
 #endregion
 
 #region Creating Docker image
 $DockerPath = "{0}/../docker/" -f $PSScriptRoot
-$Repository = New-ECRRepository -RepositoryName $appName -Region $Region
 $ECRLogin = Get-ECRLoginCommand
-$ECRLogin.Command
+(Get-ECRRepository).foreach{ if ($_.RepositoryName -eq $appName) { $Repository = $_; } }
 
 $dockerTagCommand = "docker tag {0}:latest {1}:latest" -f $appName, $Repository.RepositoryUri
 $dockerPushCommand = "docker push {0}:latest" -f $Repository.RepositoryUri
+$dockerBuildCommand = "docker build {0} -t {1}:latest" -f $DockerPath, $appName
 
 Add-Content -Path "/home/ec2-user/scripts/setup/docker-push.sh" -Value $ECRLogin.Command
-Add-Content -Path "/home/ec2-user/scripts/setup/docker-push.sh" -Value "docker build ${DockerPath} -t ${appName}:latest"
+Add-Content -Path "/home/ec2-user/scripts/setup/docker-push.sh" -Value $dockerBuildCommand
 Add-Content -Path "/home/ec2-user/scripts/setup/docker-push.sh" -Value $dockerTagCommand
 Add-Content -Path "/home/ec2-user/scripts/setup/docker-push.sh" -Value $dockerPushCommand
 sudo chmod +x /home/ec2-user/scripts/setup/docker-push.sh
 sudo /home/ec2-user/scripts/setup/docker-push.sh
+#endregion
+
+#region Deploying SAML federation roles in target AWS accounts
+$SAMLRolesCfnPath = "{0}/saml-roles.json" -f $PSScriptRoot
+if ([System.IO.File]::Exists($SAMLRolesCfnPath))
+{
+	#Replacing MetadataDocument with actual SAML certificate metadata
+	$SAMLCertificateStr = Get-Content $SAMLCertificateFilePath
+	$SAMLCertificateStr = $SAMLCertificateStr.Replace("`"", "\`"")
+	$SAMLRolesCfn = [System.IO.File]::ReadAllText($SAMLRolesCfnPath)
+    $SAMLRolesCfn = ([System.String]$SAMLRolesCfn).Replace("<MetadataDocument>", $SAMLCertificateStr)
+	Set-Content -Path $SAMLRolesCfnPath -Value $SAMLRolesCfn	
+	
+		#region Ascertaining account id of target accounts
+		$StackSetInstanceAccounts = New-Object string[] $arns.Count
+		$AccountsStr = ""
+		for ($c = 0; $c -lt $arns.Count; $c++)
+		{
+			$keyArn = $arns[$c]
+			$keyArnSegments = ([System.String]$keyArn).Split(':')
+			$StackSetInstanceAccounts[$c] = $keyArnSegments[4]
+			if ([System.String]::IsNullOrWhiteSpace($AccountsStr))
+			{
+				$AccountsStr = $keyArnSegments[4]
+			}
+			else
+			{
+				$AccountsStr = "{0},{1}" -f $AccountsStr, $keyArnSegments[4]
+			}
+		}
+		$AccountsStrPath = "{0}/accounts.txt" -f $PSScriptRoot
+		Set-Content -Path $AccountsStrPath -Value $AccountsStr
+		#endregion
+	
+	#Saving the final StackSet template in application S3 bucket for future use.
+	Write-S3Object -BucketName $appName -Key "saml-roles-cfn.json" -File $SAMLRolesCfnPath -Force
+	Write-S3Object -BucketName $appName -Key "accounts.txt" -File $AccountsStrPath -Force
+	
+	$message = "StackSet template is stored in S3 bucket {0}/saml-roles-cfn.json. Would you like to deploy it now?<y/n>" -f $appName
+	Write-Host $message -ForegroundColor Cyan
+	$prmpt = Read-Host
+	if ($prmpt -eq "y")
+	{
+		#Deploying StackSet through CloudFormation
+		$Capabilities = New-Object string[] 2
+		$Capabilities[0] = "CAPABILITY_NAMED_IAM"
+		$Capabilities[1] = "CAPABILITY_IAM"
+		New-CFNStackSet -StackSetName $appName -TemplateBody $SAMLRolesCfn -Capability $Capabilities
+		Get-CFNStackSetList
+		$StackSetInstanceRegions = New-Object string[] 1
+		$StackSetInstanceRegions[0] = $Region
+		
+		New-CFNStackInstance -StackSetName $appName -StackInstanceRegion $StackSetInstanceRegions -Account $StackSetInstanceAccounts
+	}
+}
 #endregion
 
 Write-Host "Completed running setup.ps1 script. SAML federation synchronization task is now configured. If you did not receive any errors during setup, synchronization task can be verified at provided frequency periods."

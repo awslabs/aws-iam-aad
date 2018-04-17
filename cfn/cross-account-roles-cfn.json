@@ -1,0 +1,89 @@
+{
+   "AWSTemplateFormatVersion": "2010-09-09",
+	"Parameters" : {
+		"TrustedAccountNumber" : {
+		  "Description" : "Trusted account number",
+		  "Type": "String",
+		  "MinLength": "12",
+		  "MaxLength": "12",
+		  "AllowedPattern": "(\\d{12})",
+		  "ConstraintDescription": "must be a 12 digit number."
+	    }
+	},
+	"Resources": {
+		"AWSCloudFormationStackSetExecutionRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"RoleName": "AWSCloudFormationStackSetExecutionRole",
+				"AssumeRolePolicyDocument": {
+				   "Version" : "2012-10-17",
+				   "Statement": [ {
+					  "Effect": "Allow",
+					  "Principal": {
+						 "AWS": { "Fn::Join" : ["", ["arn:aws:iam::", { "Ref" : "TrustedAccountNumber" }, ":root" ]]}
+					  },
+					  "Action": [ "sts:AssumeRole" ]
+				   } ]
+				},
+				"ManagedPolicyArns": [ 
+					"arn:aws:iam::aws:policy/IAMFullAccess",
+					"arn:aws:iam::aws:policy/AWSLambdaExecute"
+				],
+				"Path": "/"
+			}
+		},
+		"StackSetExecutionRolePolicies": {
+			"Type": "AWS::IAM::Policy",
+			"DependsOn": [
+				"AWSCloudFormationStackSetExecutionRole"
+			],
+			"Properties": {
+				"PolicyName": "StackSetExecutionRolePolicies",
+				"PolicyDocument": {
+				    "Version" : "2012-10-17",
+				    "Statement": [
+						{
+							"Effect": "Allow",
+							"Action": [
+								"cloudformation:*",
+								"s3:*",
+								"sns:*",
+								"lambda:*",
+								"xray:PutTelemetryRecords",
+								"xray:PutTraceSegments",
+								"iam:PassRole"
+							],
+							"Resource": [
+								"*"
+							]
+						}
+					]
+				},
+				"Roles": [ { "Ref": "AWSCloudFormationStackSetExecutionRole" } ]
+			}
+		},
+		"CrossAccountRole": {
+		 "Type": "AWS::IAM::Role",
+		 "Properties": {
+			"AssumeRolePolicyDocument": {
+			   "Version" : "2012-10-17",
+			   "Statement": [ {
+				  "Effect": "Allow",
+				  "Principal": {
+					 "AWS": { "Fn::Join" : ["", ["arn:aws:iam::", { "Ref" : "TrustedAccountNumber" }, ":root" ]]}
+				  },
+				  "Action": [ "sts:AssumeRole" ]
+			   } ]
+			},
+			"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/IAMReadOnlyAccess" ],
+			"Path": "/"
+		 }
+		}
+   },
+   "Outputs" : {
+		"RoleArn" : {
+		  "Value" : { "Fn::GetAtt" : [ "CrossAccountRole", "Arn" ]},
+		  "Description" : "The ARN value of the Cross-Account Role with IAM read-only permissions. Add this ARN value to your ARN list JSON file."
+		}
+   }
+}

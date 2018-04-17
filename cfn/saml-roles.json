@@ -1,0 +1,179 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+	"Resources": {
+		"IdentityProvider": {
+		  "Type": "Custom::IdentityProvider",
+		  "Properties": {
+			"ServiceToken": { "Fn::GetAtt" : ["IdPLambda", "Arn"] },
+			"Region": { "Ref" : "AWS::Region" },
+			"Metadata": "<MetadataDocument>",
+			"Name": "AzureAD"
+		  }
+		},
+		"IdPLambda": {
+		  "Type": "AWS::Lambda::Function",
+		  "Properties": {
+			"Runtime": "python2.7",
+			"Handler": "index.lambda_handler",
+			"MemorySize": 128,
+			"Role": { "Fn::GetAtt" : ["IdPLambdaExecutionRole", "Arn"] },
+			"Timeout": 30,
+			"Code": {
+			  "ZipFile": { "Fn::Join": ["", [
+					"import boto3 \n",
+					"from botocore.exceptions import ClientError \n",
+					"import json \n",
+					"import cfnresponse \n",
+					"iam = boto3.client(\"iam\") \n",
+					"def create_idp(name, saml_metadata): \n",
+					"  try: \n",
+					"    resp = iam.create_saml_provider(SAMLMetadataDocument=saml_metadata,Name=name) \n",
+					"    return(True, resp['SAMLProviderArn']) \n",
+					"  except Exception as e: \n",
+					"    return (False, \"Could not create SAML IdP: \" + str(e)) \n",
+					"def delete_idp(arn): \n",
+					"  try: \n",
+					"    iam.delete_saml_provider(SAMLProviderArn=arn) \n",
+					"    return (True, \"SAML provider with ARN \" + arn + \" deleted\") \n",
+					"  except ClientError as e: \n",
+					"    if e.response['Error']['Code'] == \"NoSuchEntity\": \n",
+					"      return (True, \"SAML provider with ARN \" + arn + \" already deleted.\") \n",
+					"    else: \n",
+					"      return (False, \"Could not delete SAML IdP with ARN \" + arn + \": \" + str(e)) \n",
+					"  except Exception as e: \n",
+					"    return (False, \"Could not delete SAML IdP with ARN \" + arn + \": \" + str(e)) \n",
+					"def update_idp(arn, saml_metadata): \n",
+					"  try: \n",
+					"    resp = iam.update_saml_provider(SAMLMetadataDocument=saml_metadata, SAMLProviderArn=arn) \n",
+					"    return (True, \"SAML provider \" + arn + \" updated\") \n",
+					"  except Exception as e: \n",
+					"    return (False, \"Cannot update SAML provider \" + arn + \": \" + str(e)) \n",
+					"def lambda_handler(event, context): \n",
+					"  saml_metadata = event['ResourceProperties']['Metadata'] \n",
+					"  idp_name = event['ResourceProperties']['Name'] \n",
+					"  if event['RequestType'] == 'Create': \n",
+					"    res, idp_arn = create_idp(idp_name, saml_metadata) \n",
+					"    reason = \"Creation succeeded\" \n",
+					"  else: \n",
+					"    idp_arn = \"arn:aws:iam::", { "Ref" : "AWS::AccountId" }, ":saml-provider/\" + idp_name \n",
+					"    if event['RequestType'] == 'Update': \n",
+					"      res, reason = update_idp(idp_arn, saml_metadata) \n",
+					"    elif event['RequestType'] == 'Delete': \n",
+					"      res, reason = delete_idp(idp_arn) \n",
+					"    else: \n",
+					"      res = False \n",
+					"      reason = \"Unknown operation: \" + event['RequestType'] \n",
+					"  responseData = {} \n",
+					"  responseData['Reason'] = reason \n",
+					"  if res: \n",
+					"    cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, idp_arn) \n",
+					"  else: \n",
+					"    cfnresponse.send(event, context, cfnresponse.FAILED, responseData, idp_arn)\n"
+				]]}
+			}
+		  }
+		},
+		"IdPLambdaExecutionRole": {
+		  "Type": "AWS::IAM::Role",
+		  "Properties": {
+			"Path": "/",
+			"AssumeRolePolicyDocument": {
+			  "Version": "2012-10-17",
+			  "Statement": [
+				{
+				  "Effect": "Allow",
+				  "Principal": {
+					"Service": [
+					  "lambda.amazonaws.com"
+					]
+				  },
+				  "Action": [
+					"sts:AssumeRole"
+				  ]
+				}
+			  ]
+			},
+			"Policies": [
+			  {
+				"PolicyName": "root",
+				"PolicyDocument": {
+				  "Version": "2012-10-17",
+				  "Statement": [
+					{
+					  "Effect": "Allow",
+					  "Action": [
+						"iam:*SamlProvider"
+					  ],
+					  "Resource": "*"
+					},
+					{
+					  "Effect": "Allow",
+					  "Action": [
+						"logs:CreateLogGroup",
+						"logs:CreateLogStream",
+						"logs:PutLogEvents"
+					  ],
+					  "Resource": "*"
+					}
+				  ]
+				}
+			  }
+			]
+		  }
+		},
+		"FederatedAdministratorRole": {
+			"Type": "AWS::IAM::Role",
+			"DependsOn": [ "IdentityProvider" ],
+			"Properties": {
+				"RoleName": "FederatedAdministratorRole",
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": {
+						"Effect": "Allow",
+						"Action": "sts:AssumeRoleWithSAML",
+						"Principal": {"Federated": { "Fn::Join" : ["", ["arn:aws:iam::", { "Ref" : "AWS::AccountId" }, ":saml-provider/AzureAD" ]]}},
+						"Condition": {"StringEquals": {"SAML:aud": "https://signin.aws.amazon.com/saml"}}
+					}
+				},
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/AdministratorAccess" ],
+				"Path": "/"
+			}
+		},
+		"FederatedObserverRole": {
+			"Type": "AWS::IAM::Role",
+			"DependsOn": [ "IdentityProvider" ],
+			"Properties": {
+				"RoleName": "FederatedObserverRole",
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": {
+						"Effect": "Allow",
+						"Action": "sts:AssumeRoleWithSAML",
+						"Principal": {"Federated": { "Fn::Join" : ["", ["arn:aws:iam::", { "Ref" : "AWS::AccountId" }, ":saml-provider/AzureAD" ]]}},
+						"Condition": {"StringEquals": {"SAML:aud": "https://signin.aws.amazon.com/saml"}}
+					}
+				},
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/ReadOnlyAccess" ],
+				"Path": "/"
+			}
+		},
+		"FederatedDBARole": {
+			"Type": "AWS::IAM::Role",
+			"DependsOn": [ "IdentityProvider" ],
+			"Properties": {
+				"RoleName": "FederatedDBARole",
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": {
+						"Effect": "Allow",
+						"Action": "sts:AssumeRoleWithSAML",
+						"Principal": {"Federated": { "Fn::Join" : ["", ["arn:aws:iam::", { "Ref" : "AWS::AccountId" }, ":saml-provider/AzureAD" ]]}},
+						"Condition": {"StringEquals": {"SAML:aud": "https://signin.aws.amazon.com/saml"}}
+					}
+				},
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/job-function/DatabaseAdministrator" ],
+				"Path": "/"
+			}
+		}
+   }
+}
