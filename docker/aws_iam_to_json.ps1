@@ -43,7 +43,7 @@ function SwitchAccount()
         $arnList.ForEach{
             $roleArn = $_;
 			$creds = (Use-STSRole -RoleArn $roleArn -RoleSessionName "Setting_up_AAD_SSO_to_AWS_Console").Credentials
-			$credList.Add($creds);
+			$count = $credList.Add($creds);
 		}
 		
 		ProcessAccount
@@ -59,18 +59,18 @@ function SwitchAccount()
 function FindSAMLProviderArn()
 {
 	$samlProviders = Get-IAMSAMLProviders
-	$spArn = [string]::Empty;
+	$spArn = [system.collections.arraylist]::new();
 	foreach ($sprovider in $samlProviders)
 	{        
 		$provider = Get-IAMSAMLProvider -SAMLProviderArn $sprovider.Arn
 		$metadata = [xml]$provider.SAMLMetadataDocument
 		if (($metadata.EntityDescriptor.ID -eq $SAMLMetaDataEntityDescriptorID) -and ($metadata.EntityDescriptor.entityID -eq $SAMLMetaDataEntityDescriptorEntityID))
 		{
-			$spArn = $sprovider.Arn;
-			break;
+			$count = $spArn.Add($sprovider.Arn);
 		}
 	}
-	return $spArn;
+
+	return $spArn.ToArray();
 }
 
 #Find IAM Roles associated with a SAML provider
@@ -88,7 +88,7 @@ function FindFederatedRoles($samlProviderArn)
 				if ($policy -like $expected)
 				{
 					$combinedArn = "{0},{1}" -f $role.Arn, $samlProviderArn
-					$arnList.Add($combinedArn);
+					$count = $arnList.Add($combinedArn);
 				}
 			}
 		}        
@@ -98,7 +98,7 @@ function FindFederatedRoles($samlProviderArn)
 
 function ReadManifestJson()
 {
-	$json = [System.IO.File]::ReadAllText($OutFile);#$ManifestJsonPath);
+	$json = [System.IO.File]::ReadAllText($OutFile);
 	$manifestObj = ConvertFrom-Json -InputObject $json;
 	return $manifestObj;
 }
@@ -109,9 +109,9 @@ function AddAppRoleToManifest([System.Collections.ArrayList] $appRoles, $arn)
 	foreach ($role in $appRoles)
 	{
 		if ($role.value -eq $arn)
-		{
+		{			
 			Write-Host "Skipping " $arn -ForegroundColor Green
-			$result = $appRoles.ToArray();
+			$result = $appRoles;
             break;
 		}
 	}
@@ -121,9 +121,9 @@ function AddAppRoleToManifest([System.Collections.ArrayList] $appRoles, $arn)
 	    Write-Host "Adding " $arn -ForegroundColor Green
 	    $json = ComposeManifestJson($arn);                    
 	    $role = ConvertFrom-Json($json);
-	    $appRoles.Add($role);
+	    $count = $appRoles.Add($role);
 
-	    $result = $appRoles.ToArray();
+	    $result = $appRoles;
     }
 	return $result
 }
@@ -203,20 +203,21 @@ function ProcessAccount()
 {
 	$manifestObj = ReadManifestJson;
 	$appRoles = [System.Collections.ArrayList]::new();
-	$appRoles.AddRange($manifestObj.appRoles);
+	$count = $appRoles.AddRange($manifestObj.appRoles);
 
-	$samlProviderArn = [string]::Empty;
-	$samlProviderArn = FindSAMLProviderArn;
-
-	$appRoles = TraverseRoles($samlProviderArn) -appRoles $appRoles 
+	$samlProviderArnList = FindSAMLProviderArn;
 	$newAppRoles = [System.Collections.ArrayList]::new();
-	foreach ($ar in $appRoles)
-	{
-		if ($ar.allowedMemberTypes -eq "User")
-		{
-			$newAppRoles.Add($ar);
-		}
+	$samlProviderArnList.ForEach{
+		$samlProviderArn = $_;
+		$appRoles = TraverseRoles($samlProviderArn) -appRoles $appRoles 
 	}
+	foreach ($ar in $appRoles)
+		{
+			if ($ar.allowedMemberTypes -eq "User")
+			{
+				$count = $newAppRoles.Add($ar);
+			}
+		}
 	$manifestObj.appRoles = $newAppRoles.ToArray();
 
 	PrintOutput($manifestObj);  
@@ -246,7 +247,6 @@ function TraverseAccounts()
     PrepareCleanSlateOnOutFile
     SwitchAccount
     $outputjson = [System.IO.File]::ReadAllText($OutFile);
-    #Write-Host $outputjson;
 
     $message = "JSON output is copied to {0}" -f $OutFile
     Write-Host $message;

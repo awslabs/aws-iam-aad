@@ -181,32 +181,40 @@ function UpdateApp([string] $appJson, $requestHeader)
 	$aadApp = ConvertFrom-Json -InputObject $appJson;
 	$producedApp = ConvertFrom-Json -InputObject $manifestJson;
 
-	$lookup = [System.Collections.HashTable]::new()
-	$mendedRoles = [System.Collections.ArrayList]::new()
-	$mendedLookup = [System.Collections.HashTable]::new()
+	$existingRolesLookup = [System.Collections.HashTable]::new()
+	$finalRolesList = [System.Collections.ArrayList]::new()
+	$finalRolesLookup = [System.Collections.HashTable]::new()
 	foreach ($role in $aadApp.appRoles)
 	{
 		if ($role.displayName -eq "msiam_access")
 		{
-			$mendedRoles.Add($role);
-			$mendedLookup.Add($role.id, $role);
+			$count = $finalRolesList.Add($role);
+			$count = $finalRolesLookup.Add($role.id, $role);
 		}
 		else
 		{
-			$lookup.Add($role.value, $role)
+			$count = $existingRolesLookup.Add($role.value, $role)
 		}		
 	}
 
 	foreach ($role in $producedApp.appRoles)
 	{
-		if ($role.value -ne $null -and $lookup.ContainsKey($role.value))
+		if ($role.value -ne $null -and $existingRolesLookup.ContainsKey($role.value))
 		{
-			$mendedRoles.Add($lookup[$role.value]);
-			$mendedLookup.Add($lookup[$role.value].id, $lookup[$role.value]);
+            $existingRole = $existingRolesLookup[$role.value];
+            if (!$finalRolesLookup.ContainsKey($existingRole.id))
+            {
+			    $count = $finalRolesList.Add($existingRole);
+			    $count = $finalRolesLookup.Add($existingRole.id, $existingRole);
+            }
+            else
+            {
+                Write-Host "Found duplicate: "$existingRole.value -ForegroundColor Yellow
+            }
 		}
 		elseif ($role.displayName -ne "msiam_access")
 		{
-			$mendedRoles.Add($role);
+			$count = $finalRolesList.Add($role);
 		}
 	}
 
@@ -214,7 +222,7 @@ function UpdateApp([string] $appJson, $requestHeader)
 	$deletionFound = $false;
 	foreach ($role in $aadApp.appRoles)
 	{
-		if (!$mendedLookup.ContainsKey($role.id))
+		if (!$finalRolesLookup.ContainsKey($role.id))
 		{
 			$role.isEnabled = $false	
 			$deletionFound = $true;
@@ -230,7 +238,7 @@ function UpdateApp([string] $appJson, $requestHeader)
 
 	#Returning final JSON
 	
-	$aadApp.appRoles = $mendedRoles.ToArray();
+	$aadApp.appRoles = $finalRolesList.ToArray();
 	
 	$json = ConvertTo-Json $aadApp -Compress;
 	
