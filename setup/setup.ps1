@@ -16,8 +16,7 @@ param (
     [string] $ManifestJsonPath, 
     [Parameter(Mandatory=$true)]
     [string] $SAMLCertificateFilePath, 
-    [Parameter(Mandatory=$true)]
-    [string] $SwitchRoleArnsFilePath,
+    [string] $SwitchRoleArnsFilePath = "cross-account-roles-arn-list.json",
     [Parameter(Mandatory=$true)]
     [string] $azureADTenantName,
     [string] $azureUserName, 
@@ -131,6 +130,36 @@ if (![System.IO.File]::Exists($SwitchRoleArnsFilePath) -and [Environment]::OSVer
 }
 $json = [System.IO.File]::ReadAllText($SwitchRoleArnsFilePath);
 $arns = ConvertFrom-Json -InputObject $json;
+
+if (($arns.Length -eq 3) -and ($arns[0] -eq "arn:aws:iam::111111111111:role/CrossAccountRole"))
+{
+	Write-Host "Cross-account roles ARN list file is not modified. Using Amazon Organizations to generate ARN values..."
+	$accounts = Get-ORGAccountList
+	#Get root account identity
+	$identity = Get-STSCallerIdentity
+	$arns = New-Object string[] ($accounts.Length - 1)
+	$count = 0;
+	$json = "["
+	foreach ($a in $accounts)
+	{
+		#include only accounts other than root account
+		if ($a.Id -ne $identity.Account)
+		{
+			if (!$json.EndsWith('['))
+			{
+				$json = "{0}," -f $json
+			}
+			$roleArn = "arn:aws:iam::{0}:role/AWS_IAM_AAD_UpdateTask_CrossAccountRole" -f $a.Id
+			$arns[$count++] = $roleArn
+			$json = "{0}`"{1}`"" -f $json, $roleArn			
+		}
+	}	
+	$json = "{0}]" -f $json
+	$res = Set-Content -Value $json -Path $SwitchRoleArnsFilePath
+	Write-S3Object -BucketName $appName -Key "cross-account-roles-arn-list.json" -File $SwitchRoleArnsFilePath -Force
+	$message = "{0} was generated using your Amazon Organizations account list. A copy has been placed in application S3 bucket. You can access it on S3 path: s3://{0}/{1}" -f "cross-account-roles-arn-list.json", $appName
+	Write-Host $message -ForegroundColor Cyan
+}
 #endregion
 
 #region Creating SSM Parameters

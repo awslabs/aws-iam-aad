@@ -76,7 +76,8 @@
 			   } ]
 			},
 			"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/IAMReadOnlyAccess" ],
-			"Path": "/"
+			"Path": "/",
+			"RoleName": "AWS_IAM_AAD_UpdateTask_CrossAccountRole"
 		 }
 		}
    },
