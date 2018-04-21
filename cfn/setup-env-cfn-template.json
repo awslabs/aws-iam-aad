@@ -33,6 +33,12 @@
 		  "MinLength": "6",
 		  "MaxLength": "20",
 		  "Default": "AWS {0} - {1}"
+	    },
+		"AzureADTennantName" : {
+		  "Description" : "Your tenant name in Azure Active Directory. e.g. example.com, or somecompany.onmicrosoft.com",
+		  "Type": "String",
+		  "MinLength": "6",
+		  "MaxLength": "200"
 	    }
 	},
 	"Mappings" : {
@@ -179,7 +185,7 @@
 					"pwsh -Command /tmp/install_aws.ps1 \n",
 					"cat >> /home/ec2-user/.bash_profile <<EOF\n",
 					"SETUP_PS1=\"/home/ec2-user/scripts/setup/setup.ps1\" \n",
-					"SETUP_PS_COMMAND=\"/home/ec2-user/scripts/setup/setup.ps1 ", "-appName ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref" : "AWS::Region" }, " -kmsKeyId ", { "Fn::GetAtt": ["ParamEncryptionKey", "Arn"] }, "\" \n",
+					"SETUP_PS_COMMAND=\"/home/ec2-user/scripts/setup/setup.ps1 ", "-appName ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref" : "AWS::Region" }, " -kmsKeyId ", { "Fn::GetAtt": ["ParamEncryptionKey", "Arn"] }, "-azureADTenantName ", { "Ref" : "AzureADTennantName" }, "\" \n",
 					"if [[ -f \\$SETUP_PS1 ]] \n",
 					"then \n",
 					"    cd /home/ec2-user/scripts/setup \n",
