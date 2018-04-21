@@ -1,17 +1,3 @@
-<#Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-  
-  Licensed under the Apache License, Version 2.0 (the "License").
-  You may not use this file except in compliance with the License.
-  A copy of the License is located at
-  
-      http://www.apache.org/licenses/LICENSE-2.0
-  
-  or in the "license" file accompanying this file. This file is distributed 
-  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either 
-  express or implied. See the License for the specific language governing 
-  permissions and limitations under the License.#>
-
-#region defining directory separator character based on environment OS
 #region defining directory separator character based on environment OS
 $dirChar = "\"
 if ([Environment]::OSVersion.Platform -eq "Unix")
@@ -37,19 +23,40 @@ $msiam_access_id = (Get-SSMParameter -Name $env:AppName".msiam_access_id" -WithD
 $SAMLMetaDataEntityDescriptorID = (Get-SSMParameter -Name $env:AppName".SAMLMetaDataEntityDescriptorID" -WithDecryption $true -Region $env:Region).Value
 $SAMLMetaDataEntityDescriptorEntityID = (Get-SSMParameter -Name $env:AppName".SAMLMetaDataEntityDescriptorEntityID" -WithDecryption $true -Region $env:Region).Value
 
-$arnListStr = (Get-SSMParameter -Name $env:AppName".arn" -Region $env:Region).Value
-$arnArr = $arnListStr.Split(',');
-$arnList = [System.Collections.ArrayList]::new()
-foreach ($a in $arnArr)
+#region Acquiring list of cross-account roles
+$accounts = Get-ORGAccountList
+
+#Get root account identity
+$identity = Get-STSCallerIdentity
+
+$arns = New-Object string[] ($accounts.Length - 1)
+$count = 0;
+$json = "["
+foreach ($a in $accounts)
 {
-	$arnList.Add($a)
-}
-$arnListJson = ConvertTo-Json -InputObject $arnList;
-$arnListPath = "{0}{1}arnList.json" -f $PSScriptRoot, $dirChar
-[System.IO.File]::WriteAllText($arnListPath, $arnListJson);        
+	#include only accounts other than root account
+	if ($a.Id -ne $identity.Account)
+	{
+		if (!$json.EndsWith('['))
+		{
+			$json = "{0}," -f $json
+		}
+		$roleArn = "arn:aws:iam::{0}:role/AWS_IAM_AAD_UpdateTask_CrossAccountRole" -f $a.Id
+		$arns[$count++] = $roleArn
+		$json = "{0}`"{1}`"" -f $json, $roleArn			
+	}
+}	
+$SwitchRoleArnsFilePath = "cross-account-roles-arn-list.json"
+$json = "{0}]" -f $json
+$res = Set-Content -Value $json -Path $SwitchRoleArnsFilePath
+Write-S3Object -BucketName $appName -Key "cross-account-roles-arn-list.json" -File $SwitchRoleArnsFilePath -Force
+$message = "{0} was generated using your Amazon Organizations account list. A copy has been placed in application S3 bucket. You can access it on S3 path: s3://{0}/{1}" -f "cross-account-roles-arn-list.json", $appName
+Write-Host $message -ForegroundColor Cyan
+#endregion
+     
 
 Write-Host "Running scripts..."
-/docker/aws_iam_to_json.ps1 -appId $appId -msiam_access_id $msiam_access_id -SAMLMetaDataEntityDescriptorID $SAMLMetaDataEntityDescriptorID -SAMLMetaDataEntityDescriptorEntityID $SAMLMetaDataEntityDescriptorEntityID -SwitchRoleArnsFileJson $arnListPath -NamingConvention $env:NamingConvention | /docker/aad_eapp_update.ps1 -azureADTenantName $azureADTenantName -azureUserName $azureUserName -azurePassword $azurePassword
+/docker/aws_iam_to_json.ps1 -appId $appId -msiam_access_id $msiam_access_id -SAMLMetaDataEntityDescriptorID $SAMLMetaDataEntityDescriptorID -SAMLMetaDataEntityDescriptorEntityID $SAMLMetaDataEntityDescriptorEntityID -SwitchRoleArnsFileJson $SwitchRoleArnsFilePath -NamingConvention $env:NamingConvention | /docker/aad_eapp_update.ps1 -azureADTenantName $azureADTenantName -azureUserName $azureUserName -azurePassword $azurePassword
 
 Stop-Transcript
 

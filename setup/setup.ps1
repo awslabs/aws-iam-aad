@@ -13,11 +13,6 @@
 
 param (
     [Parameter(Mandatory=$true)]
-    [string] $ManifestJsonPath, 
-    [Parameter(Mandatory=$true)]
-    [string] $SAMLCertificateFilePath, 
-    [string] $SwitchRoleArnsFilePath = "cross-account-roles-arn-list.json",
-    [Parameter(Mandatory=$true)]
     [string] $azureADTenantName,
     [string] $azureUserName, 
     [string] $azurePassword, 
@@ -33,6 +28,40 @@ $dirChar = "\"
 if ([Environment]::OSVersion.Platform -eq "Unix")
 {
 	$dirChar = "/"
+}
+#endregion
+
+#region Finding parameter file names
+$jsonFiles = Get-ChildItem -Path $PSScriptRoot -Name *.json
+if ($jsonFiles.Count -eq 0)
+{
+	Write-Host "Expected to find Manifest JSON file in setup directory. No json files were found. Terminating setup unsuccessfully."
+	Exit 1;
+}
+elseif ($jsonFiles.Count -gt 1)
+{
+	Write-Host "More than one JSON file found in setup directory. Please enter the file name for Manifest JSON:"
+	$ManifestJsonPath = Read-Host
+}
+else
+{
+	$ManifestJsonPath = $jsonFiles
+}
+
+$xmlFiles = Get-ChildItem -Path $PSScriptRoot -Name *.xml
+if ($xmlFiles.Count -eq 0)
+{
+	Write-Host "Expected to find SAML Certificate Metadata XML file in setup directory. No XML files were found. Terminating setup unsuccessfully."
+	Exit 1;
+}
+elseif ($xmlFiles.Count -gt 1)
+{
+	Write-Host "More than one XML file found in setup directory. Please enter the file name for Manifest SAML Certificate Metadata XML:"
+	$SAMLCertificateFilePath = Read-Host
+}
+else
+{
+	$SAMLCertificateFilePath = $xmlFiles
 }
 #endregion
 
@@ -124,42 +153,34 @@ $SAMLMetaDataEntityDescriptorEntityID = $SAMLCertificate.EntityDescriptor.entity
 #endregion
 
 #region Getting swtich role arn values
-if (![System.IO.File]::Exists($SwitchRoleArnsFilePath) -and [Environment]::OSVersion.Platform -eq "Unix" -and $PSScriptRoot -eq "/home/ec2-user/scripts/setup")
+Write-Host "Using Amazon Organizations to generate cross-account roles ARN values..."
+$accounts = Get-ORGAccountList
+Write-Host "Found " $accounts.Length "accounts in your organization."
+#Get root account identity
+$identity = Get-STSCallerIdentity
+$arns = New-Object string[] ($accounts.Length - 1)
+$count = 0;
+$json = "["
+foreach ($a in $accounts)
 {
-	$SwitchRoleArnsFilePath = "{0}/{1}" -f $PSScriptRoot, $SwitchRoleArnsFilePath
-}
-$json = [System.IO.File]::ReadAllText($SwitchRoleArnsFilePath);
-$arns = ConvertFrom-Json -InputObject $json;
-
-if (($arns.Length -eq 3) -and ($arns[0] -eq "arn:aws:iam::111111111111:role/CrossAccountRole"))
-{
-	Write-Host "Cross-account roles ARN list file is not modified. Using Amazon Organizations to generate ARN values..."
-	$accounts = Get-ORGAccountList
-	#Get root account identity
-	$identity = Get-STSCallerIdentity
-	$arns = New-Object string[] ($accounts.Length - 1)
-	$count = 0;
-	$json = "["
-	foreach ($a in $accounts)
+	#include only accounts other than root account
+	if ($a.Id -ne $identity.Account)
 	{
-		#include only accounts other than root account
-		if ($a.Id -ne $identity.Account)
+		if (!$json.EndsWith('['))
 		{
-			if (!$json.EndsWith('['))
-			{
-				$json = "{0}," -f $json
-			}
-			$roleArn = "arn:aws:iam::{0}:role/AWS_IAM_AAD_UpdateTask_CrossAccountRole" -f $a.Id
-			$arns[$count++] = $roleArn
-			$json = "{0}`"{1}`"" -f $json, $roleArn			
+			$json = "{0}," -f $json
 		}
-	}	
-	$json = "{0}]" -f $json
-	$res = Set-Content -Value $json -Path $SwitchRoleArnsFilePath
-	Write-S3Object -BucketName $appName -Key "cross-account-roles-arn-list.json" -File $SwitchRoleArnsFilePath -Force
-	$message = "{0} was generated using your Amazon Organizations account list. A copy has been placed in application S3 bucket. You can access it on S3 path: s3://{0}/{1}" -f "cross-account-roles-arn-list.json", $appName
-	Write-Host $message -ForegroundColor Cyan
-}
+		$roleArn = "arn:aws:iam::{0}:role/AWS_IAM_AAD_UpdateTask_CrossAccountRole" -f $a.Id
+		$arns[$count++] = $roleArn
+		$json = "{0}`"{1}`"" -f $json, $roleArn			
+	}
+}	
+$json = "{0}]" -f $json
+$SwitchRoleArnsFilePath = "{0}{1}cross-account-roles-arn-list.json" -f $PSScriptRoot, $dirChar
+$res = Set-Content -Value $json -Path $SwitchRoleArnsFilePath
+Write-S3Object -BucketName $appName -Key "cross-account-roles-arn-list.json" -File $SwitchRoleArnsFilePath -Force
+$message = "{0} was generated using your Amazon Organizations account list. A copy has been placed in application S3 bucket. You can access it on S3 path: s3://{0}/{1}" -f "cross-account-roles-arn-list.json", $appName
+Write-Host $message -ForegroundColor Cyan
 #endregion
 
 #region Creating SSM Parameters
@@ -172,20 +193,6 @@ Write-SSMParameter -Name $appName".msiam_access_id" -Value $msiam_access_id -Key
 
 Write-SSMParameter -Name $appName".SAMLMetaDataEntityDescriptorID" -Value $SAMLMetaDataEntityDescriptorID -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
 Write-SSMParameter -Name $appName".SAMLMetaDataEntityDescriptorEntityID" -Value $SAMLMetaDataEntityDescriptorEntityID -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
-
-$arnsList = ""
-for ($c = 0; $c -lt $arns.Count; $c++)
-{
-	if ([System.String]::IsNullOrWhiteSpace($arnsList))
-	{
-		$arnsList = $arns[$c].Trim()
-	}
-	else
-	{
-		$arnsList = "{0},{1}" -f $arnsList, $arns[$c].Trim()
-	}    
-}
-Write-SSMParameter -Name $appName".arn" -Value $arnsList -Type StringList -Region $Region -Overwrite $true
 #endregion
 
 #region Creating Docker image
@@ -218,19 +225,23 @@ if ([System.IO.File]::Exists($SAMLRolesCfnPath))
 	
 		#region Ascertaining account id of target accounts
 		$StackSetInstanceAccounts = New-Object string[] $arns.Count
+		$accounts = Get-ORGAccountList
+		$count = 0;
 		$AccountsStr = ""
-		for ($c = 0; $c -lt $arns.Count; $c++)
+		foreach ($a in $accounts)
 		{
-			$keyArn = $arns[$c]
-			$keyArnSegments = ([System.String]$keyArn).Split(':')
-			$StackSetInstanceAccounts[$c] = $keyArnSegments[4]
-			if ([System.String]::IsNullOrWhiteSpace($AccountsStr))
+			#Uncomment to include only accounts other than root account
+			#if ($a.Id -ne $identity.Account)
 			{
-				$AccountsStr = $keyArnSegments[4]
-			}
-			else
-			{
-				$AccountsStr = "{0},{1}" -f $AccountsStr, $keyArnSegments[4]
+				$StackSetInstanceAccounts[$count++] = $a.Id		
+				if ([System.String]::IsNullOrWhiteSpace($AccountsStr))
+				{
+					$AccountsStr = $keyArnSegments[4]
+				}
+				else
+				{
+					$AccountsStr = "{0},{1}" -f $AccountsStr, $keyArnSegments[4]
+				}
 			}
 		}
 		$AccountsStrPath = "{0}/accounts.txt" -f $PSScriptRoot

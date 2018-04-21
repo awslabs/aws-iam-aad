@@ -489,6 +489,13 @@
 						"Resource": [
 							{ "Fn::Join" : ["", [ "arn:aws:kms:", { "Ref" : "AWS::Region" }, ":", { "Ref" : "AWS::AccountId" }, ":key/", { "Fn::GetAtt": ["ParamEncryptionKey", "Arn"] } ]]}
 						]
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"organizations:ListAccounts"
+						],
+						"Resource": "*"
 					}
 				]
 			},
@@ -667,15 +674,6 @@
 			   "Type": "String",
 			   "Value": "EntityDescriptorEntityIDParam",
 			   "Description": "SSM Parameter for SAMLMetaDataEntityDescriptorEntityID."
-           }
-        },
-		"ArnsParam": {
-           "Type": "AWS::SSM::Parameter",
-           "Properties": {
-			   "Name": { "Fn::Join" : ["", [ {"Ref": "AWS::StackName"}, ".arn" ]]},
-			   "Type": "String",
-			   "Value": "comma separated list of role arn values",
-			   "Description": "SSM Parameter for arn."
            }
         }
    },
