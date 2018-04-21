@@ -49,8 +49,8 @@ foreach ($a in $accounts)
 $SwitchRoleArnsFilePath = "cross-account-roles-arn-list.json"
 $json = "{0}]" -f $json
 $res = Set-Content -Value $json -Path $SwitchRoleArnsFilePath
-Write-S3Object -BucketName $appName -Key "cross-account-roles-arn-list.json" -File $SwitchRoleArnsFilePath -Force
-$message = "{0} was generated using your Amazon Organizations account list. A copy has been placed in application S3 bucket. You can access it on S3 path: s3://{0}/{1}" -f "cross-account-roles-arn-list.json", $appName
+Write-S3Object -BucketName $env:AppName -Key "cross-account-roles-arn-list.json" -File $SwitchRoleArnsFilePath -Force
+$message = "{0} was generated using your Amazon Organizations account list. A copy has been placed in application S3 bucket. You can access it on S3 path: s3://{0}/{1}" -f "cross-account-roles-arn-list.json", $env:AppName
 Write-Host $message -ForegroundColor Cyan
 #endregion
      
