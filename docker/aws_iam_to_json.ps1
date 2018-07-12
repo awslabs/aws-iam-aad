@@ -131,7 +131,9 @@ function AddAppRoleToManifest([System.Collections.ArrayList] $appRoles, $arn)
 #Naming convention is defined here
 function ExtractSampleGroupName($arn)
 {
-	$account = Get-IAMAccountAlias
+	$account = "";
+	#Uncomment below line if you want to use account alias instead of account number. Account number is preferred because it is fixed. But alias could change at any time in future.
+	#$account = Get-IAMAccountAlias
 	if ([string]::IsNullOrWhiteSpace($account))
 	{
 		$account = $arn.SubString($arn.IndexOf("::") + 2);
