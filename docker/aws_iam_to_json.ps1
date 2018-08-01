@@ -25,6 +25,8 @@ param (
     [string] $OutFile
 )
 
+Import-Module -Name AWSPowerShell.NetCore
+
 #region defining directory separator character based on environment OS
 $dirChar = "\"
 if ([Environment]::OSVersion.Platform -eq "Unix")

@@ -58,7 +58,7 @@ function Get-MSGraphToken($azureADTenantName, $azureUserName, $azurePassword)
     #region Validating parameters
     if ([System.String]::IsNullOrWhiteSpace($azureUserName) -or [System.String]::IsNullOrWhiteSpace($azurePassword))
     {
-	    $message = "Please enter your Azure credentials. Your Azure user must be on Azure tenant {0}, and be assigned with Global Admin role on this tenant." -f $azureADTenantName
+	    $message = "Please enter your Azure credentials. Your Azure user must be on Azure tenant {0}, and be assigned as owner of your AWS SSO app within this AAD tenant." -f $azureADTenantName
 	    if ([System.String]::IsNullOrWhiteSpace($azureUserName))
         {
             $credential = Get-Credential -Message $message

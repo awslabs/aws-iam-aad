@@ -121,11 +121,11 @@
 			]
 		  }
 		},
-		"FederatedAdministratorRole": {
+		"FederatedPowerUserRole": {
 			"Type": "AWS::IAM::Role",
 			"DependsOn": [ "IdentityProvider" ],
 			"Properties": {
-				"RoleName": "FederatedAdministratorRole",
+				"RoleName": "FederatedPowerUserRole",
 				"AssumeRolePolicyDocument": {
 					"Version": "2012-10-17",
 					"Statement": {
@@ -135,7 +135,7 @@
 						"Condition": {"StringEquals": {"SAML:aud": "https://signin.aws.amazon.com/saml"}}
 					}
 				},
-				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/AdministratorAccess" ],
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/PowerUserAccess" ],
 				"Path": "/"
 			}
 		},
