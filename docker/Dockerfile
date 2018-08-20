@@ -11,7 +11,7 @@
 #  express or implied. See the License for the specific language governing 
 #  permissions and limitations under the License.#>
 
-FROM centos
+FROM amazonlinux
 SHELL ["/bin/sh", "-c"]
 RUN curl https://packages.microsoft.com/config/rhel/7/prod.repo | tee /etc/yum.repos.d/microsoft.repo; \
     yum install -y powershell; \
