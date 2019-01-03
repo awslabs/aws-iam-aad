@@ -18,8 +18,11 @@ Write-Host "AppName: "$env:AppName
 
 Write-Host "Getting parameters..."
 $azureADTenantName = (Get-SSMParameter -Name $env:AppName".azureADTenantName" -WithDecryption $true -Region $env:Region).Value
-$azureUserName = (Get-SSMParameter -Name $env:AppName".azureUserName" -WithDecryption $true -Region $env:Region).Value
-$azurePassword = (Get-SSMParameter -Name $env:AppName".azurePassword" -WithDecryption $true -Region $env:Region).Value
+#$azureUserName = (Get-SSMParameter -Name $env:AppName".azureUserName" -WithDecryption $true -Region $env:Region).Value
+#$azurePassword = (Get-SSMParameter -Name $env:AppName".azurePassword" -WithDecryption $true -Region $env:Region).Value
+$azureCredentials = (Get-SECSecretValue -SecretId $env:AppName".azureCredentials" -Region $env:Region).SecretString | ConvertFrom-Json
+$azureUserName = $azureCredentials.AzureUser
+$azurePassword = $azureCredentials.AzurePassword
 $appId = (Get-SSMParameter -Name $env:AppName".appId" -WithDecryption $true -Region $env:Region).Value
 $msiam_access_id = (Get-SSMParameter -Name $env:AppName".msiam_access_id" -WithDecryption $true -Region $env:Region).Value
 $SAMLMetaDataEntityDescriptorID = (Get-SSMParameter -Name $env:AppName".SAMLMetaDataEntityDescriptorID" -WithDecryption $true -Region $env:Region).Value

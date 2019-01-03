@@ -106,17 +106,17 @@ else
 	}
 	catch
 	{
-		if ($_Exception.Message.contains("AADSTS70002"))
+		if ($_.Exception.Message.contains("AADSTS70002"))
 		{
 			Write-Host "Invalid Azure AD credentials. Login failed while testing provided credentials." -ForegroundColor Red
 		}
-		elseif ($_Exception.Message.contains("AADSTS70002"))
+		elseif ($_.Exception.Message.contains("AADSTS70002"))
 		{
 			Write-Host "Invalid AAD tenant name. Login failed while testing provided credentials." -ForegroundColor Red
 		}
 		else
 		{
-			Write-Host $_Exception.Message -ForegroundColor Red
+			Write-Host $_.Exception.Message -ForegroundColor Red
 		}
 		
 		Write-Host "Encountered error while validating parameters. Aborting execution. Please re-run the script either through command line, or by opening a new session."
@@ -187,8 +187,9 @@ Write-Host $message -ForegroundColor Cyan
 
 #region Creating SSM Parameters
 Write-SSMParameter -Name $appName".azureADTenantName" -Value $azureADTenantName -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
-Write-SSMParameter -Name $appName".azureUserName" -Value $azureUserName -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
-Write-SSMParameter -Name $appName".azurePassword" -Value $azurePassword -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+#Write-SSMParameter -Name $appName".azureUserName" -Value $azureUserName -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+#Write-SSMParameter -Name $appName".azurePassword" -Value $azurePassword -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
+Update-SECSecret -SecretId $appName".azureCredentials" -SecretString "{`"AzureUser`":`"$azureUserName`",`"AzurePassword`":`"$azurePassword`"}" -KmsKeyId $kmsKeyId -Region $Region
 
 Write-SSMParameter -Name $appName".appId" -Value $appId -KeyId $kmsKeyId -Type SecureString -Region $Region -Overwrite $true
 Write-SSMParameter -Name $appName".msiam_access_id" -Value $msiam_access_id -KeyId $kmsKeyId  -Type SecureString -Region $Region -Overwrite $true

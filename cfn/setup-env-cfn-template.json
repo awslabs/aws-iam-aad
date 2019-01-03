@@ -188,7 +188,7 @@
             },
             "Handler": "index.handler",
             "Role": { "Fn::GetAtt" : ["AMIInfoFunctionLambdaExecutionRole", "Arn"] },        
-            "Runtime": "nodejs4.3",
+            "Runtime": "nodejs8.10",
             "Timeout": "30"
           }
         },
@@ -251,7 +251,6 @@
                     "Install" : {
                         "packages" : {
                           "yum" : {
-                            "docker": [],
                             "powershell": []
                           }
                         },
@@ -289,6 +288,7 @@
                     "#Making sure boot process is completed before bootstrapping. \n",
                     "sleep 60 \n",
                     "curl https://packages.microsoft.com/config/rhel/7/prod.repo | tee /etc/yum.repos.d/microsoft.repo; \n",
+					"amazon-linux-extras install docker -y \n",
                     "# Install the files and packages from the metadata\n",
                     "/opt/aws/bin/cfn-init -v ",
                     "         --stack ", { "Ref" : "AWS::StackName" },
@@ -366,6 +366,15 @@
                         ],
                         "Resource": [
                             { "Fn::Join" : ["", [ "arn:aws:ssm:", { "Ref" : "AWS::Region" }, ":", { "Ref" : "AWS::AccountId" }, ":parameter/", {"Ref": "AWS::StackName"}, ".*" ]]}
+                        ]
+                    },
+					{
+                        "Effect": "Allow",
+                        "Action": [
+                            "secretsmanager:UpdateSecret"
+                        ],
+                        "Resource": [
+                            { "Fn::Join" : ["", [ "arn:aws:secretsmanager:", { "Ref" : "AWS::Region" }, ":", { "Ref" : "AWS::AccountId" }, ":secret:", {"Ref": "AWS::StackName"}, ".*" ]]}
                         ]
                     },
                     {
@@ -588,6 +597,16 @@
                         ],
                         "Resource": "*"
                     },
+					{
+                        "Effect": "Allow",
+                        "Action": [
+                            "secretsmanager:DescribeSecret",
+							"secretsmanager:GetSecretValue"
+                        ],
+                        "Resource": [
+							{ "Fn::Join" : ["", [ "arn:aws:secretsmanager:", { "Ref" : "AWS::Region" }, ":", { "Ref" : "AWS::AccountId" }, ":secret:", {"Ref": "AWS::StackName"}, ".*" ]]}
+						]
+                    },
                     {
                         "Sid": "Stmt1482841904000",
                         "Effect": "Allow",
@@ -750,23 +769,19 @@
                "Description": "SSM Parameter for azureADTenantName."
            }
         },
-        "AADUserParam": {
-           "Type": "AWS::SSM::Parameter",
+        "AzureCredentialsSecret": {
+           "Type": "AWS::SecretsManager::Secret",
            "Properties": {
-               "Name": { "Fn::Join" : ["", [ {"Ref": "AWS::StackName"}, ".azureUserName" ]]},
-               "Type": "String",
-               "Value": "AADUserParam",
-               "Description": "SSM Parameter for azureUserName."
-           }
-        },
-        "AADPasswdParam": {
-           "Type": "AWS::SSM::Parameter",
-           "Properties": {
-               "Name": { "Fn::Join" : ["", [ {"Ref": "AWS::StackName"}, ".azurePassword" ]]},
-               "Type": "String",
-               "Value": "AADPasswdParam",
-               "Description": "SSM Parameter for azurePassword."
-           }
+               "Name": { "Fn::Join" : ["", [ {"Ref": "AWS::StackName"}, ".azureCredentials" ]]},
+               "Description": "This secret is included in this CF template to make it easier to deploy/undeploy the whole solution from one place. The actual password value is being updated from inside the setup script.",
+               "SecretString": "{\"AzureUser\":\"AzureUserParam\",\"AzurePassword\":\"secret-password\"}",
+               "Tags": [
+                  {
+                    "Key": "AppName",
+                    "Value": {"Ref": "AWS::StackName"}
+                  }
+               ]
+            }
         },
         "AppIdParam": {
            "Type": "AWS::SSM::Parameter",
