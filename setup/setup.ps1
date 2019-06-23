@@ -236,6 +236,7 @@ if ([System.IO.File]::Exists($SAMLRolesCfnPath))
 			#Uncomment to include only accounts other than root account
 			#if ($a.Id -ne $identity.Account)
 			{
+				$keyArnSegments = $a.Arn.Split(':')
 				$StackSetInstanceAccounts[$count++] = $a.Id		
 				if ([System.String]::IsNullOrWhiteSpace($AccountsStr))
 				{
