@@ -228,7 +228,7 @@ if ([System.IO.File]::Exists($SAMLRolesCfnPath))
 	
 		#region Ascertaining account id of target accounts
 		$StackSetInstanceAccounts = New-Object string[] $arns.Count
-		$accounts = Get-ORGAccountList
+		$accounts = Get-ORGAccountList | Where-Object {$_.Status -Match "ACTIVE"} 
 		$count = 0;
 		$AccountsStr = ""
 		foreach ($a in $accounts)
