@@ -153,7 +153,7 @@
 						"Condition": {"StringEquals": {"SAML:aud": "https://signin.aws.amazon.com/saml"}}
 					}
 				},
-				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/ReadOnlyAccess" ],
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess" ],
 				"Path": "/"
 			}
 		},
