@@ -99,7 +99,7 @@ else
 
     #region Testing credentials
     Write-Host "Testing provided Azure credentials..."
-    $aadLoginScript = "{0}{1}get_aad_access_token.ps1 -azureADTenantName {2} -azureUserName {3} -azurePassword {4}" -f $PSScriptRoot, $dirChar, $azureADTenantName, $azureUserName, $azurePassword
+    $aadLoginScript = "{0}{1}get_aad_access_token.ps1 -azureADTenantName '{2}' -azureUserName '{3}' -azurePassword '{4}'" -f $PSScriptRoot, $dirChar, $azureADTenantName, $azureUserName, $azurePassword
 	try
 	{
 		$azureResponse =  Invoke-Expression -Command $aadLoginScript

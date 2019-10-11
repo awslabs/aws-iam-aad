@@ -84,7 +84,7 @@ function Get-MSGraphToken($azureADTenantName, $azureUserName, $azurePassword)
     }
     #endregion
 
-    $aadLoginScript = "{0}{1}get_aad_access_token.ps1 -azureADTenantName {2} -azureUserName {3} -azurePassword {4}" -f $PSScriptRoot, $dirChar, $azureADTenantName, $azureUserName, $azurePassword
+    $aadLoginScript = "{0}{1}get_aad_access_token.ps1 -azureADTenantName '{2}' -azureUserName '{3}' -azurePassword '{4}'" -f $PSScriptRoot, $dirChar, $azureADTenantName, $azureUserName, $azurePassword
     $azureResponse =  Invoke-Expression -Command $aadLoginScript	
 	$token = $azureResponse.access_token;
 	return $token;
