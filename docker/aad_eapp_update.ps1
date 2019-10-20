@@ -129,7 +129,8 @@ function CreateAADGroup($azureADTenantName, $groupName, $requestHeader)
 
 function FindRegisteredApp($requestHeader, $manifestObj)
 {
-    $uri = "https://graph.windows.net/{0}/applications?api-version=1.6" -f $azureADTenantName
+    #$uri = "https://graph.windows.net/{0}/applications?api-version=1.6" -f $azureADTenantName
+	$uri = "https://graph.windows.net/{0}/applications?api-version=1.6&`$filter=appId eq '{1}'" -f $azureADTenantName, $manifestObj.appId
     $applications = (Invoke-RestMethod -Method Get -Headers $requestheader -Uri $uri)    
     foreach ($app in $applications.value)
     {
